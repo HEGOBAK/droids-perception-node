@@ -1,0 +1,22 @@
+# Local assignment and private material
+*.pdf
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+private/
+# Generated builds and environments
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+# Large raw recordings remain local by default
+results/raw/
+*.mp4
+*.mov
