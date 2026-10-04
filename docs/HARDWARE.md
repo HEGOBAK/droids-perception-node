@@ -2,7 +2,6 @@
 
 [Start here](../START_HERE.md)
 
-Audit date: October 2, 2026 (America/Los_Angeles). Evidence: the user's Amazon order history inspected in this chat, local tools checked in this workspace, and the local onboarding brief. Delivery status is not a physical inspection or an electrical compatibility test.
 
 ## Ordered and marked delivered
 
@@ -14,7 +13,7 @@ Audit date: October 2, 2026 (America/Los_Angeles). Evidence: the user's Amazon o
 | HC-SR04P, ASIN B0GL8NJCVT | 2 modules; listing states 3–5.5 V | Range sensing | Oct 2 |
 | REXQualis basic electronics kit, ASIN B078XV3RK2 | Breadboard, jumpers, LEDs, resistors, power module | Prototyping | Oct 1 |
 
-**Conclusion: the main component categories are covered. A complete working setup is not yet confirmed.** The HC-SR04P is a variant of the sensor named in the brief; its exact board behavior and logic levels must be checked. Pack sizes are listing descriptions, not counts verified by opening the packages.
+**Conclusion: the main component categories are covered. A complete working setup is not yet confirmed.** The HC-SR04P is a variant of the sensor named in the brief; its exact board behavior and logic levels must be checked. Pack sizes are listed descriptions, not counts verified by opening the packages.
 
 ## Check before buying anything else
 

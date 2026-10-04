@@ -1,0 +1,17 @@
+{
+  "editor.tabCompletion": "on",
+  "editor.quickSuggestions": {
+    "other": "on",
+    "comments": "off",
+    "strings": "off"
+  },
+  "editor.inlineSuggest.enabled": true,
+  "github.copilot.enable": {
+    "*": true,
+    "plaintext": false,
+    "markdown": false,
+    "scminput": false
+  },
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
+  "cmake.sourceDirectory": "/Users/master/Desktop/Projects/Droids/firmware"
+}
