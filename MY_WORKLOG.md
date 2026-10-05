@@ -188,11 +188,191 @@ Assistant comments (corrections):
 
 ## M2 — IMU measurement and orientation
 
+M2 initial hardware inspection — the photo shows an IMU breakout marked `HW-123`. The ordered module was described as GY-521/MPU6050; [Photo evidence](figures/M2/hw123-imu-module-unsoldered-headers.png).
+
+Bias: a consistent offset. If a stationary gyro reports +0.5°/s, subtracting its measured stationary average helps.
+Noise: readings fluctuate. Averaging helps estimate the bias.
+Drift: accumulated angle error. A remaining 0.5°/s error becomes 5° after 10 seconds.
+
+Added `esp_driver_i2c` to `PRIV_REQUIRES` in `firmware/main/CMakeLists.txt`.
+A bus is the shared SDA/SCL connection between the ESP32 and sensor.
+
+Making connection: 
+Describe bus: SDA41, SCL42.
+Create bus, get handle.
+Probe 0x68 for ACK.
+Verify ID, then read.
+
+AD0 Low and High = two different addresses. For this experiment, I connect it to GND so its address is 0x68.
+
+2026-10-04 — M2 wiring: [ESP32–IMU breadboard connection photo](figures/M2/Connect_IMU_ESP32.png), saved during wiring troubleshooting; this photo is not a verified pin-by-pin wiring reference.
+
+Set up communication:
+Describe device: address 0x68, 7-bit address, 100 kHz.
+Add device to bus, get device handle.
+Read WHO_AM_I register 0x75.
+Check returned ID is 0x68.
+
+Set up cleanup using i2c_master_bus_rm_device (IMPORTANT)
+
+
+i2c_master_bus_add_device(imu_bus, &imu_config, &imu_device);
+- On this existing bus, register this device with these communication settings.
+
+2026-10-04 — M2 step 2 complete: the saved serial monitor shows `I2C device responded at 0x68` and `WHO_AM_I = 0x68 (expected 0x68)` [Screenshot evidence](figures/M2/imu-step2-success.png).
+
+register(WHO_AM_I) address = 0x75
+wake address = 0x6B
+gyro address = 0x1B
+accel address = 0x1C
+
+The MPU6050 stores measurements in 14 consecutive bytes starting at 0x3B
+
+data address = 0x3B
+
+Data received on the first try:
+Raw sensor bytes: FB 40 02 B4 76 84 01 20 FE DD 00 91 00 19
+Acceleration magnitude is about 1.85 g. If the board was stationary, that is unexpectedly far from 1 g.
+
+Investigating the acceleration error:
+- Added a 100 ms settling delay and took 20 stationary readings per pose. Upright Z stayed near +1.854 g, so the delay did not fix it.
+- Upside down, Z averaged −0.218 g. Returning upright gave about +1.86 g again.
+- The midpoint estimates a Z offset: (1.854 - 0.218) / 2 ≈ +0.818 g
+- On its side, Y was about −0.99 g and Z about +0.805 g. This separate pose supports the offset estimate. The cause is still unknown.
+- Added a provisional correction for this IMU: az_corrected = az - 0.818f. 
+
+![IMU inverted during the offset test](figures/M2/Accel_Issue.png)
+
+Correction check — 20 new readings per pose: corrected acceleration magnitude averaged 1.0431 g upright (1.0310–1.0537 g) and 0.9917 g sideways (0.9870–0.9968 g). The Z correction removes most of the error, but upright still reads about 4.3% high. 
+
+For step4, I have 2 functions:
+- imu_measure_gyro_bias: while the board is still, it takes 1000 readings, works out the average and spread of each measurement, prints a summary, and returns the gyro bias.
+- imu_log_corrected_gyro: it takes 10 more readings, subtracts that bias, and prints them. They should be close to 0.
+
+I use this data structure to store: enum { AX, AY, AZ, TEMP, GX, GY, GZ, CHANNEL_COUNT };
+Every iteration, I store compile their raw data in stats{CHANNEL_COUNT}
+
+2026-10-04 — M2 steps 3–4 complete: all range readbacks match (ACCEL_CONFIG = 0x00 after fixing the readback register). 1000 still samples over 9.99 s (dt 10.00 ms), temperature 35.1 °C. Gyro bias: gx −2.271, gy +1.142, gz +0.170 °/s (std ≈ 0.10 °/s each). Corrected check readings stay near 0 °/s. [Screenshot evidence](figures/M2/imu-step4-gyro-bias.png).
+
+Sign convention (right-hand rule):
+- Roll is positive when the +Y end (VCC end) lifts.
+- Pitch is positive when the +X end (the rail side) dips.
+
+My test poses for tilt:
+1. Flat
+2. VCC end up
+3. VCC end down
+4. Flat
+5. Rail side down
+6. Rail side up
+7. Flat
+
+2026-10-04 — M2 step 5 tilt test, poses held by hand (so expected angles are approximate). [Log](results/M2/log.hello_world.20261004202933.txt)
+
+| Pose | Roll | Pitch |
+|---|---|---|
+| Flat (start / middle / end) | 2.1 / 2.0 / 2.0° | 3.9 / 4.1 / 4.0° |
+| VCC end up | +91 to +96° | ≈ 0° |
+| VCC end down | −88 to −90° | ≈ 0° |
+| Rail side down | not meaningful | +81° |
+| Rail side up | not meaningful | −87° |
+
+Every angle moved in the expected direction, and flat returned within 0.1°. Gyro bias repeated within 0.01 °/s of the first run (gx −2.264, gy +1.152, gz +0.169 °/s).
+Open: flat reads 2° / 4° instead of 0° (desk, mounting or sensor offset — not yet separated). Rail side down reads 81°, not 90°.
+
+Z scale fix: X and Y read ≈ 1 g on their edges, but Z reads 3.6% too big.
+- Scale from upright/inverted: (1.853845 + 0.218091) / 2 ≈ 1.036
+- Now az = (az − 0.818) / 1.036. Flat magnitude should be ≈ 1.00 g instead of 1.04 g.
+
+2026-10-04 — M2 step 6: complementary filter for roll.
+gyro_only_deg -> Adds up the gyro alone -> drift
+accel_deg -> gravity alone, worked out fresh each time -> noise, and being fooled by movement
+filtered_deg -> the blend of the two -> the result you actually want
+
+angle = alpha * (angle + gx * dt) + (1 − alpha) * accel_roll, alpha = tau / (tau + dt)
+dt is measured every step (10.00 ms every time).
+
+My test: still → tilt to ~40° and back → slide left/right → still. Same test for 3 tau values:
+
+| tau | Still noise (filtered std) | Recovery after disturbance | Log |
+|---|---|---|---|
+| 0.1 s | 0.031° | ~0.3 s | [Log](results/M2/imu-step6-roll-filter-tau0.1.txt) |
+| 0.5 s | 0.021° | ~1.2 s | [Log](results/M2/imu-step6-roll-filter-tau0.5.txt) |
+| 2.0 s | 0.018° | > 4 s (not back by the end) | [Log](results/M2/imu-step6-roll-filter-tau2.0.txt) |
+
+Accel alone is much noisier (std ≈ 0.17°).
+
+What I learned:
+- Small tau follows the accel more: noisier, but fixes errors fast.
+- Big tau is smoother, but slow to fix errors.
+- Gyro-only never comes back to start (+0.55°, −0.51°, +0.68° off at the end). Filtered always does.
+- Shaking makes the gyro wrong: in pauses during the slide, gyro-only was off by up to 7° while accel said the board barely moved. Likely cause: the sensor's low-pass filter is off (gyro passes ~256 Hz, but I only read at 100 Hz).
+- My slides weren't the same each run, so the slide numbers can't be compared fairly.
+
+Sensor low-pass filter (step 7 start):
+- What: the MPU6050's built-in filter (DLPF). It removes changes faster than ~20 Hz before I read the data.
+- Why: I read at 100 Hz, but the gyro was passing ~256 Hz. Fast shaking between reads got added up as fake angle (up to 7° off in step 6).
+- How: write CONFIG (0x1A) = 0x04 and read it back. Cost: ~8.5 ms delay.
+- Gain: less false angle, quieter accel.
+- Expected: CONFIG = 0x04 (expected 0x04).
+- Observed: 
+
+Tilt from accel (atan2f):
+- atan2f(y, x) = angle from two sides, in radians → × RAD_TO_DEG.
+- Better than atan(y/x): no divide-by-zero, and keeps the signs (can tell upright from upside down).
+- roll = atan2f(ay, az); pitch = atan2f(-ax, sqrt(ay² + az²)).
+
+Gyro vs accel:
+- Accel = angle now (like GPS); worked out fresh from each reading.
+- Gyro = turning speed (like a speedometer); angle = running total of gx × dt, so it's kept from one loop to the next.
+- The running total also keeps every small error → drift.
+
+Complementary filter, tau:
+- tau = time constant, how fast accel pulls drift back (63% after 1 tau, ~95% after 3).
+- alpha = tau / (tau + dt) = 0.5 / 0.51 ≈ 0.98 → trust gyro 98%, accel 2%.
+- Bigger tau = smoother but slower to fix drift; smaller = faster fix but more shake.
+
+2026-10-04 — M2 step 7: testing (tau 0.5 s, low-pass filter on).
+
+Still run, full log from the bias summary: [Log](results/M2/imu-step7-still-full-summary.txt)
+- Accel magnitude with Z offset + scale: 1.0108 g (was 1.039 g with offset only).
+- Gyro noise (std): ~0.03 °/s per axis (was ~0.10 °/s before the low-pass filter).
+- Bias: gx −2.278, gy +1.326, gz +0.197 °/s at 32.9 °C. gy moved +0.18 °/s from my 35.1 °C runs → bias changes, so I measure it every startup.
+- 30 s still: gyro-only drifted +0.06° (≈ 0.12°/min). Filtered stayed 2.15–2.19°.
+
+A. Slide with low-pass filter: [Log](results/M2/imu-step7-A-slide-lowpass.txt) · [Plot](figures/M2/m2-step7-slide-lowpass-before-after.svg)
+- Accel noise when still: 0.191° → 0.043° (≈ 4× quieter). Filtered: 0.021° → 0.008°.
+- Gyro-only error in slide pauses: up to 7° before → ~0.1–0.4° now.
+- Filtered stayed 1.7–2.5° during the slides and ended at 2.10° (accel 2.11°).
+
+C. Bias wrong on purpose (+1 °/s): [Log](results/M2/imu-step7-C-bias-error-1dps.txt) · [Plot](figures/M2/m2-step7-bias-error-test.svg)
+- Gyro-only: +1.002 °/s (2.3° → 32.2° in 30 s).
+- Filtered: settled 0.500° above accel = error × tau = 1 × 0.5. Exactly as predicted.
+
+E. Unplug SDA: [Log](results/M2/imu-step7-E-unplug-retry.txt) · [Plot](figures/M2/m2-step7-unplug-recovery.svg)
+- INVALID at 22.66 s, loop kept running (~110 ms per failed read), VALID again at 30.47 s after 71 failed reads.
+- Angles restarted from accel (2.17° vs 2.10° before). Run ended on time.
+- First try never came back: [Log](results/M2/imu-step7-E-unplug.txt). Most likely SDA wasn't making contact when I pushed it back.
+
+Step 6 plot (3 tau values): [Plot](figures/M2/m2-step6-tau-comparison.svg). Plots are made by `python3 host/plot_m2.py`.
 
 Questions: 
+1. Why does averaging 1000 still gyro samples give a good bias estimate? Use your step 4 numbers (mean vs std). What did test C show happens to gyro-only and to the filtered angle when the bias is wrong by 1 °/s?
+-> Avg larger sample size gives better result. gyro_only angle adds up the bias and gives a 30 degree error on the final result if we run for 30s while the filtered angle was not affect that much.
+
+2. Why can't this sensor alone keep yaw (rotation about the vertical axis) correct forever? What does the accel see when you turn the flat board around Z, and what happens to a gyro-only angle over time?
+-> not sure
+
+3. Why must we use the measured dt and the configured sensitivity (131 counts per °/s, 16384 counts per g)? What would happen to the angle if dt were 10% wrong, or if the gyro range were changed to ±500 °/s but the code still divided by 131?
+-> Has to be the time interval between data collected because it is using that dt to calculate the position now from prev. We chose that option from the start. If dt were 10% wrong, we would accumulate large error. Would result in error because frequency doesn't match.
 
 
 Assistant comments (corrections):
+
+- **M2 notes overall:** Your I2C steps, register addresses, offset/scale method and step 6–7 results are correct and match the logs. The `enum` doesn't store data; it names positions 0–6, and each loop adds readings to running totals in `stats[CHANNEL_COUNT]` rather than storing them. "Accel = angle now" holds only while the board isn't accelerating. Fill in "Observed" for the low-pass filter.
+- **Q1:** Mostly correct. Averaging shrinks random noise by √N: 0.10 / √1000 ≈ 0.003 °/s, tiny next to the −2.27 °/s bias. In test C, gyro-only grows without limit (30° in 30 s), while filtered settles at a fixed 0.5° (error × tau) and never grows.
+- **Q2:** Turning the flat board around Z doesn't change gravity's direction, so the accel can't see yaw. Only gz measures it, and its leftover bias keeps adding up (0.003 °/s ≈ 11°/hour). Yaw needs another reference, such as a compass or camera; the MPU6050 has neither.
+- **Q3:** Right idea for dt: angle step = rate × dt, so a 10% dt error makes every turn 10% wrong (it adds nothing while still). The sensitivity issue is scale, not frequency: at ±500 °/s (65.5 counts per °/s), dividing by 131 makes a 90° turn read 45°. That's why the code reads the range registers back before using 131 and 16384.
 
 
 ---------------------------------------------------------------------------------

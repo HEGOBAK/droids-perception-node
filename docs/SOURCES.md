@@ -9,7 +9,7 @@ Reviewed October 2, 2026. Vendor and Espressif documentation support technical c
 - [Espressif camera driver](https://github.com/espressif/esp32-camera): camera ownership, supported hardware and configuration.
 - [ESP-IDF FreeRTOS](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/system/freertos_idf.html): scheduling and communication.
 - [MCPWM](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/mcpwm.html), [RMT](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/rmt.html), [I2C](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/i2c.html), [UART](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/uart.html): driver references.
-- [TDK MPU6000/6050 specification](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Datasheet.pdf): chip reference; not a GY-521 breakout schematic.
+- [TDK MPU6000/6050 specification](https://product.tdk.com/system/files/dam/doc/product/sensor/mortion-inertial/imu/data_sheet/mpu-6000-datasheet1.pdf): chip reference; not a GY-521 breakout schematic.
 - [REXQualis downloads](https://www.rexqualis.com/download/): locate the exact Basic Kit manual; contents and power capability still require confirmation.
 
 Amazon order titles support only the inventory recorded in HARDWARE.md. No manufacturer-confirmed HC-SR04P schematic for the purchased module has been established. All performance thresholds, task rates, protocol layout and exercises in this guide are proposed project design choices unless labeled as brief requirements.
