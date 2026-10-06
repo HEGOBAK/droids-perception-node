@@ -482,11 +482,210 @@ Assistant comments (corrections):
 
 ## M4 — Camera and colored-object detection
 
+WE use RGB565 to store each pixel (2 bytes / 16 bits)
+
+bit:  15 14 13 12 11 | 10  9  8  7  6  5 |  4  3  2  1  0
+       R  R  R  R  R |  G  G  G  G  G  G |  B  B  B  B  B
+       
+return (uint8_t)((r * 255 / 31 + g * 255 / 63 + b * 255 / 31) / 3);
+- To scale each of them fairly on 0-255 (green max number is 63 not 31 like others)
+
+Text preview = picture cut into blocks:
+- Camera: 160 × 120 pixels. Screen: 32 × 12 characters.
+- So 32 × 12 = 384 blocks, each 5 wide × 10 tall = 50 pixels → 1 character (its average brightness).
+
+ x:  0    5    10   15  ...                    155   160
+ y 0 ┌────┬────┬────┬─ ... ─┬────┐
+     │ c0 │ c1 │ c2 │       │c31 │  ← text row 0 (pixel rows 0–9)
+  10 ├────┼────┼────┼─ ... ─┼────┤
+     │ c0 │ c1 │ c2 │       │c31 │  ← text row 1 (pixel rows 10–19)
+  20 ├────┼────┼────┼─ ... ─┼────┤
+     ...                              ...
+ 110 ├────┼────┼────┼─ ... ─┼────┤
+     │ c0 │ c1 │ c2 │       │c31 │  ← text row 11 (pixel rows 110–119)
+ 120 └────┴────┴────┴─ ... ─┴────┘
+ 
+Finding the pixel byte : 
+- pixel (3, 2) is pixel number 2 × 160 + 3 = 323, which starts at byte 646
+- Imagine we have a pointer that starts at the top left corner then goes right all the way until the end
+    then goes to the next row. If the pixel is y = 2, then it is on the third row since y = 0 and therefore
+    there is 2 rows above it so 2 x 160 for everything above its row then + x is the number from left (0) on its own row
+    
+Average brightness → character: mean is 0–255. sizeof(RAMP) - 1 = 10 characters (the -1 skips the hidden end marker that every C string has). So mean × 10 ÷ 256 gives a slot from 0 to 9. Dark picks a space, bright picks @.
+
+line[PREVIEW_COLS] = '\0' adds that end marker, so printf("%s") knows where the text stops. That's why line has room for 32 + 1 characters.
+
+Simple camera setup [Photo](figures/M4/m4-camera-setup.png)
+
+Camera workflow:
+- app_main runs vision_init once: XCLK on, settings written over SCCB, DMA + buffer in PSRAM. Prints sensor (like WHO_AM_I) and free PSRAM.
+- while(1), every 1 s, one vision_capture_preview:
+  1. fb = esp_camera_fb_get() → borrow the frame (a pointer to the driver's buffer, not my copy).
+  2. Print width × height, format and bytes (expect 38400).
+  3. Text preview: 32 × 12 blocks of 5 × 10 pixels → average brightness → 1 character.
+  4. esp_camera_fb_return(fb) → give it back. Don't use fb after this.
+- Orientation test: black square on the iPad's left / top → dark on image left / top. If not → MIRROR / FLIP_VERTICAL = 1.
+
+vision_init ──► while(1): borrow ──► print info ──► text preview ──► return ──► wait 1 s ──┐
+                  ▲                                                                         │
+                  └─────────────────────────────────────────────────────────────────────────┘
+
+Orientation (iPad drawings): [Half](figures/M4/m4-step1-orientation-half.png) · [Plus](figures/M4/m4-step1-orientation-plus.png) · [Smile](figures/M4/m4-step1-orientation-smile.png)
+- Half: dark on camera's left → dark on image left → left/right OK.
+- Smile: preview upside down → image flipped vertically only.
+- Plus: symmetric, no info, but the picture is sharp.
+
+I decide to turn the board over (USB on top) because USB cable easier to route for later builds, and the camera hangs straight with gravity → tape holds better.
+- Turning a camera over = rotate 180° = flip up/down AND left/right.
+- Up/down cancels the old flip → up is OK. Left/right becomes mirrored -> FLIP_VERTICAL = 0, MIRROR = 1.
+
+Check after the flip: smile upright, and the black strip on the iPad's left is dark on image left → orientation OK : [Photo](figures/M4/m4-step1-orientation-fixed.png)
+
+I use HSV to dinstint color (in our case is red) instead of RGB :
+Hue =           which colour (an angle on a colour wheel)
+Saturation =    how strong the colour is (0 = grey, 1 = pure colour)
+Value =         how bright
+
+For hue, we need to know that red sits where the circle joins up: both just above 0° and just below 360°. A slightly orange red might be 10°, and a slightly pink red 350°. So the rule for red needs two pieces.
+
+For red :
+H ≤ 20° OR H ≥ 340° (both sides of the wrap-around) (Two pieces)
+S ≥ 0.5             (strongly coloured, which rejects white, grey and skin)
+V ≥ 0.25             (not almost black; very dark pixels have unreliable hue)
+
+I then get HSV from RGB like this :
+max = biggest of R, G, B
+min = smallest of R, G, B
+
+V = max / 255                          how bright the strongest channel is
+S = (max − min) / max                  0 when all equal (grey), 1 when one channel is 0
+H = depends on WHICH channel is max:
+      R is max → 60 × (G − B) / (max − min)          (around 0°, can go negative → add 360)
+      G is max → 60 × (B − R) / (max − min) + 120
+      B is max → 60 × (R − G) / (max − min) + 240
+      
+Two examples:
+- Bright red (230, 30, 30): max = 230 (R), min = 30.
+        -> V = 0.90
+        -> S = 200 / 230 = 0.87
+        -> H = 60 × (30 − 30) / 200 = 0° ✓
+- White (240, 240, 240): max = min, so S = 0, and the hue doesn't matter. Rejected
+
+Step 2: format RGB565 (2 bytes/pixel). Stride = 160 × 2 = 320 bytes per row. 38400 = 120 × 320 → no padding, so (y × 160 + x) × 2 finds every pixel.
+
+Step 3 code (vision.c):
+- Bug I had: saved raw r/g/b (0–31, 0–63, 0–31) → green always looked strongest → wrong hue. Fix: scale to 0–255 BEFORE saving.
+- Every pixel: RGB → HSV → is_red? → red_count++. Per block: more than half red (red_count × 2 > 50) → '#', else '.'.
+- Brightness preview and red mask printed side by side + "red pixels: N of 19200".
+- Centre pixel H/S/V printed only to check the red rule.
+
+2026-10-06 — Step 3 test (red rule H ≤ 20° or ≥ 340°, S ≥ 0.5, V ≥ 0.25):
+- Red circle on iPad: round '#' blob where the circle is, red pixels ≈ 4360 of 19200, centre H 5°, S 0.77 → red. [Photo](figures/M4/m4-step3-red-circle-mask.png)
+- White only: mask all '.', red pixels 0 of 19200, centre S 0.03 → not red. [Photo](figures/M4/m4-step3-white-no-red.png)
+- First frame centre H was 18° (near the 20° limit), then 5° → camera auto exposure / white balance settles after start-up.
+
+Now we need to find the center of the red object, I do so by averaging all red pixel's positions.
+cx = (sum of the x of every red pixel) ÷ (number of red pixels)
+cy = (sum of the y of every red pixel) ÷ (number of red pixels)
+
+Step 4 — centroid = the middle of the red pixels (one point for M5 to steer by):
+- cx = sum of x of red pixels / N, cy = sum of y / N. N = 0 → INVALID (never "the middle").
+- In my loop: where red_count++, also sum_x += x and sum_y += y (uint32_t, sums get big).
+- 160 × 120 picture → middle is cx 80, cy 60. cx < 80 = target on image left.
+- 'X' marks the centroid on the mask (pixel ÷ block size → text position). Lines are stored first and printed after, because the centroid is only known once all pixels are done.
+- Two red objects → centroid lands in the empty space between them. So one target only.
+
+2026-10-06 — Step 4 test:
+- Circle near the middle: X right in the centre of the '#' blob, valid. [Photo](figures/M4/m4-step4-centroid-centre.png)
+- Circle moved to camera's left: blob + X moved to image left (cx went down), valid. [Photo](figures/M4/m4-step4-centroid-left.png)
+- Circle erased: mask all '.', INVALID (no red pixels). [Photo](figures/M4/m4-step4-centroid-invalid.png)
+- Circle partly off the edge → centroid only averages the visible part → sits a bit inward of the real centre.
+
+A frame may have noise, multiple red targets and we must filter them.
+We only accept one target and how we know if there is really one target is by going through these checklist :
+    1. Any red at all? -> 0 red pixels -> no red pixels
+    2. Big enough? -> fewer than 200 red pixels -> too small (noise)
+    3. A blob exists? -> red pixels scattered, but no group of 2+ # blocks -> red scattered, no blob
+    4. Only ONE blob? -> 2 or more separate blobs -> ambiguous: more than one blob
+    5. Confident? -> the main blob holds under 80% of the red -> low confidence
+    
+I configure it as : 
+min red pixels = 200;   
+min connect blocks to become a blob = 2;          
+min confidence = 0.8f;   
+
+I use the method (flood-fill) like the paint-bucket tool in a drawing app :
+Go through the mask block by block.
+When you find a # you haven't seen yet, that's a new blob. Pour paint on it: mark it seen, then mark every touching #, then every # touching those, and so on, until no more connect.
+Count how many blocks got painted: that's the blob's size.
+Keep scanning. Painted blocks are skipped, so each blob is counted once.
+
+Used head and tail as a to-do list (queue) for the flood fill: tail = where the next touching '#' is added, head = the next block to paint. When head catches up with tail, nothing is left → the blob is finished.
+
+Used "if (nr < 0 || nr >= PREVIEW_ROWS || nc < 0 || nc >= PREVIEW_COLS) { continue; }" to check if the block is off the grid/picture so we don't access memory outside of mask
+
+Until step 5, one loop did everything: capture, detect, print, wait. The project's design (and M5) needs detection and control separated:
+
+Perception is slow and irregular: a frame plus the maths takes tens of milliseconds.
+Control (M5) must run on time, every 20 ms, and must never wait for the camera.
+So the camera work moves into its own task, and it hands results over through a queue.
+
+workflow:
+- app_main: vision_init once, create a 1-slot queue, start the perception task.
+- Perception task, every 100 ms:
+  1. vision_process: borrow frame → find red target → fill result {frame, time, valid, cx, cy, confidence, reason} → return frame.
+  2. Every 10th frame: print the text previews.
+  3. Once, after 3 s, on the first valid frame: dump the frame (see below).
+  4. xQueueOverwrite: copy the result into the 1 slot (latest only, never the frame pointer).
+- Main task, every 500 ms: xQueuePeek → copy the latest result → print one row (age_ms = how old, process_ms, free_heap).
+
+perception: borrow ──► detect ──► result ──► return frame ──► overwrite queue ──► wait 100 ms ──┐
+               ▲                                                                                │
+               └────────────────────────────────────────────────────────────────────────────────┘
+main:       peek queue ──► print row ──► wait 500 ms ──┐
+               ▲                                       │
+               └───────────────────────────────────────┘
+
+Frame dump (board has no screen, serial only carries text):
+- 1 byte → 2 hex characters (top 4 bits, bottom 4 bits). 1 pixel = 2 bytes = 4 characters.
+- 1 line per pixel row: 640 characters (160 pixels) + space + 40 characters of mask (4 red bits per character, board's own is_red).
+- FRAME_BEGIN (width, height, valid, cx, cy) … 120 rows … FRAME_END.
+- Mac: python3 host/frame_to_png.py <log> → PNG with picture | mask | outline + green cross at the centroid.
+
+2026-10-06 — Steps 5–7 test (one iPad session, 2 runs): [Log](results/M4/m4-steps5-7-log.txt) · [Frame](figures/M4/m4-step6-frame.png)
+- Step 5, one circle: valid, blobs 1, confidence 1.00.
+- Step 5, two circles: 30 rows "ambiguous: more than one blob", blobs 2, confidence 0.56–0.71.
+- Step 5, real noise: circle erased → red pen icon (12 pixels) → "too small (noise)", not a target.
+- Step 6, frame dump → PNG: picture, mask and green cross line up. Pen icon = a few lone mask dots, ignored.
+- Step 6, queue: frame keeps rising, age_ms normally 55–205 ms.
+- Step 7, direction: cx 85 → 26 (camera's left) → 79 → 131 (camera's right). Erased → INVALID.
+- Step 7, memory: free_heap 8681715 bytes the whole time (~3.5 min over 2 runs) → no leak.
+- Step 7, timing: processing 48.3–48.9 ms per frame. Real rate 5.9 frames/s (170 ms = 100 ms wait + ~49 ms work + printing).
+- During the frame dump (~7 s) age_ms reached 7025 ms: perception busy printing, main reads the same old result → stale. Dump = debugging only, off in M5.
+- Script fix: the main task's rows landed between the frame rows → frame_to_png.py now only accepts lines shaped like frame rows.
+
+M4 tests complete (lighting / background not tested). Questions below still to answer.
+
 
 Questions: 
 
+1. What does image shape (120, 160, 3) mean? How many bytes is one of your frames, and why?
+-> 120 rows, 160 column picture frame and 3 data per pixel. Each pixel has 2 bytes so 120 x 160 x 2. 
+
+2. Why does a JPEG's size not equal width × height × channels? Why did we use RGB565 instead of JPEG for finding red?
+-> Not sure
+
+3. Why can averaging all matching pixels put the centroid between two separate objects? What did your step 5 code do about it?
+-> Average only the position of every matching pixels gives the center in reference of the entire frame on the object itself. Check for one valid object before finding the centroid. 
+
 
 Assistant comments (corrections):
+
+- **M4 notes overall:** RGB565 unpacking, pixel address, text preview blocks, HSV and the red rule, flood fill, head/tail and the task/queue split are correct and match the code and logs. The red pen icon in the frame is a good real noise case: too few pixels to fill a block, so it never became a blob. Lighting and similar-background tests were not done, so the red thresholds are only proven under your lamp and on the iPad screen.
+- **Q1:** Mostly correct. The 3 is channels (R, G, B values per pixel), not bytes. Your format packs those 3 values into 2 bytes (5 + 6 + 5 bits), so one frame = 120 × 160 × 2 = 38 400 bytes. The same picture in RGB888 (1 byte per channel) would be 120 × 160 × 3 = 57 600.
+- **Q2:** JPEG is compressed: it drops detail the eye won't notice and stores repeating areas briefly, so its size depends on the picture (a plain white screen is small, a busy scene big). It is not a grid of pixels, so you can't read pixel (x, y) without decoding the whole image first, which costs time and memory. RGB565 gives every pixel at a known place, (y × 160 + x) × 2, always 38 400 bytes, so each pixel can be tested for red straight away.
+- **Q3:** Half right. The centroid is the mean of all red pixel positions. With two separate red areas, the positions from both sides average to a point between them, where there is no red at all (e.g. blobs at cx 30 and 130 → 80, the empty middle). Your step 5 code counts blobs with flood fill and marks the frame INVALID ("ambiguous") when there are 2 or more, so a centroid is only given for exactly one blob. Your two-circle test showed this in 30 rows.
+
 
 ---------------------------------------------------------------------------------
 

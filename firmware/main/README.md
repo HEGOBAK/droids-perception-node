@@ -1,6 +1,7 @@
 # Firmware organization
 
-- `app_main.c`: application entry point for the current milestone (M4).
+- `app_main.c`: application entry point for the current milestone (M5).
+- `idf_component.yml` + `../dependencies.lock`: the camera driver `espressif/esp32-camera` (2.1.8, built with ESP-IDF 6.1), used by M4 and later. Downloaded into `managed_components/` on the first build (not in Git). PSRAM (octal) is on in `../sdkconfig.defaults` for the camera frame buffer.
 - `CMakeLists.txt`: lists only the files that are built now.
 - `exercises/`: saved earlier milestones. Readable, but not built and do not run.
   - `m0/m0_basics.c` / `.h`: chip diagnostics and a seconds counter.
@@ -16,6 +17,9 @@
     - `m3_main.c` / `.h`: `m3_run()` (step 5): every 100 ms the servo steps 2° (sweep ±30°) and the range sensor pings a fixed target, printing `time_s,angle_deg,echo_us,distance_m` for 20 s, then the servo returns to 0.
     - `range.c` / `.h`: HC-SR04P on TRIG GPIO 21 / ECHO GPIO 1 (3.3 V). 10 µs trigger pulse, echo edges timed in an interrupt, task woken by notification, 40 ms timeout → invalid, never 0 m.
     - `servo.c` / `.h`: SG90 on GPIO 14 via MCPWM (timer → operator → comparator → generator, 1 tick = 1 µs, 20 ms frame). Calibrated: neutral 1500 µs, 10 µs per degree, + = L (counter-clockwise from above), safe limits 1050–1950 µs (±45°). `servo_set_angle_deg` / `servo_angle_to_us` take degrees; `servo_move_slowly` steps 10 µs per 20 ms. Powered from the ESP32 5V pin (USB), unloaded.
+  - `m4/`: the full M4 camera and red-target code (board mounted USB-up).
+    - `m4_main.c` / `.h`: `m4_run()`: a `perception` task runs `vision_process()` every 100 ms and copies each `vision_result_t` into a 1-slot queue (`xQueueOverwrite`); the main loop peeks it twice a second and prints `time_s,frame,age_ms,valid,cx,cy,confidence,red_pixels,blobs,process_ms,free_heap,reason`. Text previews every 10th frame; one frame dump after 3 s.
+    - `vision.c` / `.h`: OV3660 on the ribbon connector (pins 4–13, 15–18), 160×120 RGB565, one frame buffer in PSRAM, `MIRROR = 1`. Per pixel RGB565 → RGB (0–255) → HSV → red rule (H ≤ 20° or ≥ 340°, S ≥ 0.5, V ≥ 0.25). Per 5×10 block '#' if more than half red. Valid only with ≥ 200 red pixels, exactly one blob (flood fill, ≥ 2 blocks) and confidence (main blob share) ≥ 0.8. Centroid = mean x, y of red pixels. ~49 ms per frame.
 
 Headers declare functions; source files implement them. Include headers, not `.c` files. CMake lists the source files to compile and the linker connects their function calls.
 
@@ -90,3 +94,20 @@ void app_main(void)
 ```
 
 M3 needs the range sensor on TRIG 21 / ECHO 1 (3.3 V rail) and the servo on GPIO 14 (5V rail, shared GND). To use only one device, call its functions directly: `range_init()` + `range_measure()`, or `servo_init()` + `servo_set_angle_deg()`. Saved M3 logs are in `results/M3/`.
+
+**M4**
+```cmake
+idf_component_register(SRCS "app_main.c" "exercises/m4/m4_main.c" "exercises/m4/vision.c"
+                       PRIV_REQUIRES esp_timer
+                       INCLUDE_DIRS "")
+```
+```c
+#include "exercises/m4/m4_main.h"
+
+void app_main(void)
+{
+    m4_run();
+}
+```
+
+M4 needs nothing wired except USB (camera on the ribbon), the board standing USB-up, and the camera library from `idf_component.yml`. Turn a saved frame into a picture with `python3 host/frame_to_png.py <monitor log>`. Saved M4 logs are in `results/M4/`.
