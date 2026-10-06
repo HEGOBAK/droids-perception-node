@@ -41,11 +41,13 @@ Use the [Freenove vendor resources](https://github.com/Freenove/Freenove_ESP32_S
 
 | Function | GPIO | Voltage / ownership | Confirmed against board |
 |---|---|---|---|
-| Camera bus, SCCB, clock | TBD | Reserve all vendor camera pins | No |
-| IMU SDA / SCL | TBD / TBD | I2C owner; pull-ups verified | No |
-| Servo signal | TBD | MCPWM output | No |
-| Ultrasonic TRIG / ECHO | TBD / TBD | Output / protected input | No |
+| Camera bus, SCCB, clock | 4–13, 15–18 (underlined on the silkscreen) | Reserved for M4 | Silkscreen photo; vendor pin map still to confirm in M4 |
+| IMU SDA / SCL | 41 / 42 | I2C owner (M2); 3.3 V supply | Yes: M2 runs |
+| Servo signal | 14 | MCPWM output; servo powered from the ESP32 5V pin (USB), no external supply available: small, slow, unloaded moves only | Wired (M3 servo exercise) |
+| Ultrasonic TRIG / ECHO | 21 / 1 | Output / input; sensor on 3.3 V so ECHO ≤ 3.3 V | Planned (M3 distance exercise) |
 | Telemetry TX / RX or board bridge | TBD | Confirm actual UART path | No |
+
+Avoid: 2 and 48 (on-board LEDs), 0, 3, 45, 46 (boot strapping), 19 / 20 (USB), 35–37 (PSRAM, marked on the silkscreen), 38–40 (SD card), TX / RX (console). [Annotated pin photo](../figures/M3/esp32-s3-pin-plan.svg).
 
 Reserve flash/PSRAM, USB, boot-strapping, camera, and any enabled SD-card pins before assigning peripherals. Leave SD disabled initially. A USB Serial/JTAG console is not automatically a hardware UART: for the brief's UART requirement, confirm an onboard USB-UART bridge or arrange a 3.3 V USB-UART adapter. Such an adapter is conditional, not yet a confirmed purchase need.
 

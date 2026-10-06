@@ -379,11 +379,103 @@ Assistant comments (corrections):
 
 ## M3 — Distance and servo independently
 
+Connect the power/GND onto the side rails on the breadboard instead of connecting into components directly.
+HC_SR04 connected to IMU
+TRIG : GPIO 21
+ECHO : GPIO 1
+
+Ticks (why the echo timeout is 40 ms, not 30 ms):
+- FreeRTOS counts ticks (1 tick = 10 ms), not ms. Ticks beat from boot, whatever my code does.
+- "Wait 3 ticks" = wake after 3 more beats. If I start mid-tick, the first one is shorter.
+
+time (ms):  0    10    20    30    40
+ticks:      |-----|-----|-----|-----|
+                     ↑ call at 15 → wakes at 40 → waited 25 ms
+
+- So 3 ticks = 20–30 ms. Echo can last 23 ms → might give up too early.
+- 4 ticks (40 ms) = 30–40 ms → always catches it.
+- Rule: N ticks lasts between N−1 and N ticks. Add 1 tick when I need a minimum.
+
+HC_SR04 workflow:
+- app_main sets up both the pins and the ECHO interrupt config (range_init).
+- while(1) runs forever. Each loop = 1 ping, every 100 ms.
+- One ping (range_measure):
+  1. Check ECHO is LOW, empty the mailbox, set waiting_task = main task.
+  2. TRIG = 1 for 10 µs, then 0 → sensor sends the sound.
+  3. Main task sleeps (max 40 ms) until the ISR notifies it.
+  --  ISR: ECHO goes HIGH → save rise_us. ECHO goes LOW → save fall_us, notify main task.
+  5. Main task wakes where it stopped: echo_us = fall_us − rise_us. No notify in time → INVALID.
+- Print the row, then xTaskDelayUntil sleeps until 100 ms after this ping started.
+
+while(1) ──► ping ──► print ──► sleep until next 100 ms ──┐
+  ▲                                                       │
+  └───────────────────────────────────────────────────────┘
+
+Sensor: front says HC-SR04, back says RCWL-9610A design, mode pads set to GPIO. [Front](figures/M3/hc-sr04p-front.png) · [Back](figures/M3/hc-sr04p-back-rcwl9610a.png) · [Wired](figures/M3/hc-sr04p-connected-esp32.png) · [Pin plan](figures/M3/esp32-s3-pin-plan.svg)
+
+2026-10-05 — HC_SR04 test (only 15 cm possible on my desk):
+- Container at 15 cm: echo 816–817 µs → 0.140 m every ping (101 pings, 10 s). About 1 cm short; spread ≈ 0.2 mm. [Log](results/M3/range-step1-15cm.txt) · [Photo](figures/M3/m3-step1-range-15cm.png)
+- Sensor covered with a cloth: INVALID,ESP_ERR_TIMEOUT every ping, never 0 m. [Log](results/M3/range-step1-covered-invalid.txt) · [Photo](figures/M3/m3-step1-range-covered-invalid.png)
+- Rows every 0.10 s → xTaskDelayUntil keeps the 100 ms period.
+
+
+Servo workflow:
+- app_main runs servo_init once: builds the 4 MCPWM parts and starts at 1500 µs (middle).
+  timer (counts 0 → 19999 µs = 20 ms frame) → operator (links them) → comparator (the mark) → generator (GPIO 14: HIGH at 0, LOW at the mark).
+- After that, the hardware sends 1 pulse every 20 ms by itself. No task, no delay.
+- Move = move the mark (servo_set_pulse_us). Always clamped to 1300–1700 µs.
+- servo_move_slowly: +/− 10 µs every 20 ms until the target → slow move, small current spikes.
+- Test: 1500 → 1600 → 1500 → 1400 → 1500, hold 2 s each, print the row. Then app_main ends, but the servo keeps holding 1500.
+
+servo_init ──► hardware pulse every 20 ms (forever, by itself)
+
+for each target: move mark 10 µs ──► wait 20 ms ──► repeat until target ──► print ──► hold 2 s ──► next target
+
+2026-10-05 — Servo test worked: horn moved 1500 → 1600 → 1500 → 1400 → 1500 µs slowly, held each 2 s, then stayed at the middle. No reset on USB power. [Photo](figures/M3/m3-servo-sg90-connected.png)
+
+Step 4 calibration setup:
+- Sheet with angle lines every 15° (L = counter-clockwise, R = clockwise), servo shaft on C. Angles are right at any zoom. [Sheet](figures/M3/m3-servo-calibration-sheet.pdf) · [Photo](figures/M3/m3-step4-calibration-setup.png)
+- Horn turned half a turn so at 1500 µs it points along 0.
+- Calibration run config:
+  servo.c: MIN_US = 1000, MAX_US = 2000 (widened for this run only, set back after)
+  app_main.c: HOLD_MS = 3000, TEST_US = 1500, 1300, 1100, 1000, 1500, 1700, 1900, 2000, 1500
+- Read the angle at each pulse. Buzz/hum = end stop → unplug USB.
+
+2026-10-05 — Step 4 calibration result (read by eye, ±3°):
+1000 = R50, 1100 = R40, 1300 = R20, 1500 = 0, 1700 = L20, 1900 = L40, 2000 = L50, no buzz.
+- Neutral = 1500 µs. Bigger pulse = L (counter-clockwise from above) → + angle = L.
+- 10 µs per degree (1000 µs for 100°), same on both sides.
+- Safe limits = ±50° minus 5° margin = ±45° → 1050–1950 µs.
+- Now in servo.c (one place): NEUTRAL_US 1500, US_PER_DEG 10, DIRECTION +1, MIN_US 1050, MAX_US 1950.
+- New: servo_set_angle_deg(deg) → pulse = 1500 + deg × 10. M5 can command angles, not µs.
+- Check: commanded 0 → +30 → 0 → −30 → 0. Arm landed on L30, R30 and 0. Step 4 done.
+
+2026-10-05 — Step 5: range + servo together. [Log](results/M3/range-servo-step5.txt) · [Photo](figures/M3/m3-step5-range-while-servo-sweeps.png)
+- Every 100 ms: servo steps 2° (sweep ±30°), sensor pings a fixed box at ~15 cm. 20 s run.
+- 182 pings, 0 INVALID, no reset, rows every 0.10 s.
+- Distance 0.146–0.147 m the whole time the servo swept (3 full sweeps).
+- Only the first 1.5 s read 0.133 m. Not the servo: the same angles later read 0.147. Most likely my hand near the sensor at the start.
+- So servo current/noise on USB 5V did not disturb the range or reset the board (unloaded servo).
+
 
 Questions: 
 
+1. Why do we divide the echo time by two? Use your step 1 numbers: 816 µs echo → what distance, and why not 0.280 m?
+-> The sound goes to the target and back. 343 x (816/100000)/2 = 0.14m not 0.28m.
+
+2. Why does commanding 30° not prove the shaft physically reached 30°? Think about what goes from the ESP32 to the servo, what comes back, and what current_us really stores.
+-> ESP32 sends the mark or the pulse width. current_us stores the latest commanded pulse width
+
+3. Why can a servo destabilize the board even when the GPIO signal is correct? Think about where your servo gets its power from, what happens when it starts moving or is blocked, and what the IMU and range sensor share with it.
+-> When the motor turns, it produces torque in the opposite direction and therefore, if connected to the board, will move the IMU and range sensor from their original position or the direction they face. Servo gets its power from the 5.5 power source from ESP32 and that the ESP32 is already supplying 3.3 to IMU and range sensor
+
 
 Assistant comments (corrections):
+
+- **M3 notes overall:** Pin plan, tick timing, HC_SR04 and servo workflows, calibration and step 5 are correct and match the logs. "HC_SR04 connected to IMU" means it shares the IMU's 3.3 V and GND rails, not the IMU itself. Range step 4 (ruler at 0.20 / 0.50 / 1.00 m) was skipped: only 15 cm fit on the desk, so range bias is known at one distance only (about −1 cm). The servo runs from USB 5V, unloaded; calibration was read by eye (±3°).
+- **Q1:** Correct. One fix: µs → s is ÷ 1,000,000, not 100,000. 343 × 0.000816 / 2 = 0.140 m. Without ÷ 2 you get 0.280 m, the round trip.
+- **Q2:** Half the answer. The other half: nothing comes back. There is no wire from the servo to the ESP32, so `current_us` is only what you asked for, not where the shaft is. If the shaft is blocked, the supply sags or it hits a stop, the code still says 30°. Only an outside reference (your calibration sheet) shows the real angle.
+- **Q3:** Mostly mechanical, but the main reason is electrical. Starting or blocked, the servo pulls large current spikes (hundreds of mA) from the same USB 5V that feeds the ESP32's 3.3 V. The voltage dips → the board can reset or sensors read wrong, and motor noise on the shared ground can glitch ECHO or I2C. The 5V pin is USB 5 V (about 5.0 V, not 5.5). Step 5 showed no problem because the servo was unloaded and moved slowly. Reaction torque is real but small here.
 
 
 ---------------------------------------------------------------------------------
