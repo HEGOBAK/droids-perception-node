@@ -1,0 +1,32 @@
+{
+  // Terminal > Run Task... Each task activates ESP-IDF v6.1 first, so idf.py always works.
+  // Flashes whatever app_main.c / CMakeLists.txt currently select (see Learning/M5.md for what each step selects).
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "M5: flash + monitor",
+      "type": "shell",
+      "command": "source ~/.espressif/tools/activate_idf_v6.1.sh && idf.py -p ${input:port} flash monitor",
+      "options": { "cwd": "${workspaceFolder}/firmware", "shell": { "executable": "/bin/zsh", "args": ["-c"] } },
+      "presentation": { "focus": true, "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "M5: monitor only",
+      "type": "shell",
+      "command": "source ~/.espressif/tools/activate_idf_v6.1.sh && idf.py -p ${input:port} monitor",
+      "options": { "cwd": "${workspaceFolder}/firmware", "shell": { "executable": "/bin/zsh", "args": ["-c"] } },
+      "presentation": { "focus": true, "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "M5: list USB ports",
+      "type": "shell",
+      "command": "ls /dev/cu.usb*",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    { "id": "port", "type": "promptString", "description": "Board port (run 'M5: list USB ports' if it changed)", "default": "/dev/cu.usbmodem1201" }
+  ]
+}

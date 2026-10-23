@@ -1,4 +1,4 @@
-# Droids Worklog
+  # Droids Worklog
 
 ---------------------------------------------------------------------------------
 
@@ -690,6 +690,35 @@ Assistant comments (corrections):
 ---------------------------------------------------------------------------------
 
 ## M5 — PID tracking and single-axis stabilization
+
+Guide: [Learning/M5.md](Learning/M5.md) (rewritten 2026-10-23: Part A hardware checks A1–A7, Part B software B1–B6). The H1/H2 entries below are from the older H-step plan.
+
+Rig:
+- Base = cardboard. Servo (shaft up), breadboard and IMU stay on it.
+- Only the ESP32 + camera ride on the horn, standing in a foam block glued to the cross horn. USB up, camera forward (same as M4, MIRROR = 1).
+- Servo pans left/right = yaw. + angle = L (counter-clockwise from above), from M3.
+
+Old camera stand (dropped): [Side](figures/M5/old-stand/camera_side.png)
+Current mount: [Front](figures/M5/m5-mount-v2-front.png) · [Side](figures/M5/m5-mount-v2-side.png) · [Back](figures/M5/m5-mount-v2-back.png)
+
+ESP-IDF in a new terminal: `source ~/.espressif/tools/activate_idf_v6.1.sh`. Port is now /dev/cu.usbmodem1201 (check with `ls /dev/cu.usb*`).
+Or in VS Code: Terminal › Run Task › M5: flash + monitor (activates ESP-IDF itself, `.vscode/tasks.json`).
+
+2026-10-08 — H1: servo only (app_main = servo_init → holds 0° = 1500 µs). Turned the servo body (not the horn) until the horn points forward, glued it to the base. [Photo](figures/M5/m5-h1-servo-glued-horn-forward.jpg)
+- Kept the horn where M3 calibrated it: taking it off can land 1 spline tooth (~15°) off.
+- Board reset once right after the servo first moved (USB dropped, booted again). Probably the start-up current dipping USB 5V. 2nd boot nothing moved → stayed up. Watch for this in H4.
+
+2026-10-08 — Swapped the single-arm horn for the cross horn so the stand sits stable. [Photo](figures/M5/m5-h1-cross-horn-fitted.jpg)
+- Calibration stays (10 µs/°, + = L, 1050–1950 µs): it belongs to the servo, not the horn.
+- Only "forward at 1500 µs" can move → recheck powered.
+
+2026-10-08 — H2: camera stand glued on the cross horn, board over the shaft, USB up, camera forward. [Side](figures/M5/old-stand/m5-h2-stand-on-horn-side.jpg) · [Front](figures/M5/old-stand/m5-h2-stand-on-horn-front.jpg)
+
+2026-10-19 — H2 redone: cardboard stand was too heavy and wobbly, ribbon too short to lay the board flat. [Front](figures/M5/m5-mount-v2-front.png) · [Side](figures/M5/m5-mount-v2-side.png) · [Back](figures/M5/m5-mount-v2-back.png)
+- Foam block glued on the cross horn, board stands vertical in it by its bottom header pins. USB up, camera forward.
+- Servo boxed in foam blocks on the cardboard base, cable out the back. Breadboard on the same base.
+- To check: board firm in the foam, pins 14 / 41 / 42 / 5V / 3V3 / GND above the foam, board over the shaft, camera forward at 1500 µs (powered).
+- M5-hardware.md rewritten for this mount.
 
 Questions:
 
