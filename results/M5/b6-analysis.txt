@@ -1,0 +1,55 @@
+== results/M5/b6-stab-off-1.txt
+  rows 1196 (24 s), fresh 1146
+  dt mean 20.001 ms, p95 |dt-20| 0.020 ms, max 20.44 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.084 (2.2°), max |e| 0.225 (5.9°), saturated 0.3%
+  turns at 15.9, 24.5 s → settling: 2.60 s, 2.90 s
+  plot → figures/M5/b6-stab-off-1.png
+== results/M5/b6-stab-off-2.txt
+  rows 1245 (25 s), fresh 1195
+  dt mean 20.001 ms, p95 |dt-20| 0.010 ms, max 20.46 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.069 (1.8°), max |e| 0.251 (6.6°), saturated 0.2%
+  turns at 17.2, 26.8 s → settling: 0.00 s, 1.94 s
+  plot → figures/M5/b6-stab-off-2.png
+== results/M5/b6-stab-off-3.txt
+  rows 1365 (27 s), fresh 1315
+  dt mean 20.001 ms, p95 |dt-20| 0.020 ms, max 20.46 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.071 (1.9°), max |e| 0.214 (5.6°), saturated 0.3%
+  turns at 16.3, 25.6 s → settling: 0.00 s, 2.78 s
+  plot → figures/M5/b6-stab-off-3.png
+== results/M5/b6-stab-on-1.txt
+  rows 1747 (35 s), fresh 1697
+  dt mean 20.000 ms, p95 |dt-20| 0.020 ms, max 20.47 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.023 (0.6°), max |e| 0.060 (1.6°), saturated 0.2%
+  turns at 23.2, 32.6 s → settling: 0.00 s, 0.00 s
+  plot → figures/M5/b6-stab-on-1.png
+== results/M5/b6-stab-on-2.txt
+  rows 1201 (24 s), fresh 1151
+  dt mean 20.000 ms, p95 |dt-20| 0.020 ms, max 20.48 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.021 (0.5°), max |e| 0.063 (1.7°), saturated 0.4%
+  turns at 16.7, 24.1 s → settling: 0.00 s, 0.00 s
+  plot → figures/M5/b6-stab-on-2.png
+== results/M5/b6-stab-on-3.txt
+  rows 1200 (24 s), fresh 1150
+  dt mean 20.001 ms, p95 |dt-20| 0.020 ms, max 20.47 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.021 (0.6°), max |e| 0.082 (2.2°), saturated 0.3%
+  turns at 16.8, 27.0 s → settling: 0.00 s, 0.00 s
+  plot → figures/M5/b6-stab-on-3.png
+== results/M5/b6-static.txt
+  rows 524 (10 s), fresh 474
+  dt mean 20.001 ms, p95 |dt-20| 0.020 ms, max 20.48 ms, late 0
+  max age (fresh) 184 ms
+  (from 1 s on) RMS e 0.022 (0.6°), max |e| 0.042 (1.1°), saturated 0.2%
+  no turns
+  static check (|e| < 0.2 all the time, no saturation): FAIL
+  plot → figures/M5/b6-static.png
+
+group         n    RMS e   max|e|   sat %  settle s  unsettled  dt max ms
+stab off      3    0.075    0.230     0.2      1.70          0      20.46
+stab on       3    0.022    0.068     0.3      0.00          0      20.48
+b6-static     1    0.022    0.042     0.2         —          0      20.48

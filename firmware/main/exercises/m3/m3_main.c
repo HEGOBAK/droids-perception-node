@@ -1,14 +1,6 @@
 // Saved M3 exercise (step 5: range + servo together); not built. See firmware/main/README.md to run it again.
 #include "m3_main.h"
 
-#include <stdio.h>
-#include "esp_err.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "range.h"
-#include "servo.h"
-
 // M3 step 5: range keeps measuring a fixed target while the servo sweeps.
 // If servo current or noise disturbs anything, the distance jumps or the board resets.
 

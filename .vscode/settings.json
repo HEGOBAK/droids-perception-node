@@ -10,7 +10,8 @@
     "*": true,
     "plaintext": false,
     "markdown": false,
-    "scminput": false
+    "scminput": false,
+    "c": true
   },
   "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
   "cmake.sourceDirectory": "/Users/master/Desktop/Projects/Droids/firmware"

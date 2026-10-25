@@ -1,11 +1,6 @@
 // Saved M2 exercise; not built. See firmware/main/README.md to run it again.
 #include "m2_main.h"
 
-#include <stdio.h>
-#include "esp_err.h"
-#include "i2c_bus.h"
-#include "imu.h"
-
 void m2_run(void)
 {
     // M2: create the shared connection, then run the IMU on it.

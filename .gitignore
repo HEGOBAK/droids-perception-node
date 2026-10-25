@@ -20,3 +20,6 @@ firmware/sdkconfig.old
 results/raw/
 *.mp4
 *.mov
+
+# Local learning explainers (never committed)
+explainers/

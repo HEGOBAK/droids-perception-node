@@ -1,0 +1,11 @@
+dt_ms=20.00 fresh=1 e=-0.01 I=-0.023 theta_track=+1.2 theta=+1.2 found=1
+dt_ms=20.00 fresh=1 e=-0.04 I=-0.042 theta_track=+2.5 theta=+2.5 found=1
+dt_ms=20.00 fresh=1 e=-0.11 I=-0.106 theta_track=+6.4 theta=+6.4 found=1
+dt_ms=20.00 fresh=1 e=-0.19 I=-0.282 theta_track=+15.1 theta=+15.1 found=1
+dt_ms=20.00 fresh=1 e=-0.13 I=-0.450 theta_track=+20.5 theta=+20.5 found=1
+dt_ms=20.00 fresh=1 e=-0.05 I=-0.522 theta_track=+21.9 theta=+21.9 found=1
+dt_ms=20.00 fresh=1 e=-0.02 I=-0.553 theta_track=+22.4 theta=+22.4 found=1
+dt_ms=20.00 fresh=1 e=+0.01 I=-0.550 theta_track=+21.9 theta=+21.9 found=1
+dt_ms=20.00 fresh=1 e=+0.01 I=-0.542 theta_track=+21.5 theta=+21.5 found=1
+dt_ms=20.00 fresh=1 e=+0.01 I=-0.534 theta_track=+21.2 theta=+21.2 found=1
+dt_ms=20.00 fresh=1 e=+0.01 I=-0.511 theta_track=+20.3 theta=+20.3 found=1

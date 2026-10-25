@@ -1,7 +1,4 @@
 #include "imu.h"
-#include "imu_calibration.h"
-#include "imu_filter.h"
-#include "imu_tilt.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -34,13 +31,14 @@ static esp_err_t write_and_verify(i2c_master_dev_handle_t device, const char *na
     return ESP_OK;
 }
 
-void imu_run(i2c_master_bus_handle_t imu_bus)
+esp_err_t imu_init(i2c_master_bus_handle_t imu_bus, i2c_master_dev_handle_t *imu_device, 
+                    gyro_bias_t *gyro_bias)
 {
     // Ask whether a device responds at 0x68; timeout is 100 ms.
     esp_err_t imu_result = i2c_master_probe(imu_bus, 0x68, 100);
     if (imu_result != ESP_OK) {
         printf("I2C probe failed: %s\n", esp_err_to_name(imu_result));
-        return;
+        return imu_result;
     }
     printf("I2C device responded at 0x68\n");
 
@@ -51,63 +49,86 @@ void imu_run(i2c_master_bus_handle_t imu_bus)
         .scl_speed_hz = 100000, // 100 kHz communication clock
     };
 
-    i2c_master_dev_handle_t imu_device = NULL;
-    imu_result = i2c_master_bus_add_device(imu_bus, &imu_config, &imu_device);
+    imu_result = i2c_master_bus_add_device(imu_bus, &imu_config, imu_device);
     if (imu_result != ESP_OK) {
         printf("Add IMU failed: %s\n", esp_err_to_name(imu_result));
-        return;
+        return imu_result;
     }
 
     // Select WHO_AM_I, then read its one-byte value.
     uint8_t identity_address = 0x75;
     uint8_t identity = 0;
     imu_result = i2c_master_transmit_receive(
-        imu_device,
+        *imu_device,
         &identity_address, 1,
         &identity, 1,
         100);
     if (imu_result != ESP_OK) {
         printf("Identity read failed: %s\n", esp_err_to_name(imu_result));
-        goto cleanup;
+        goto fail;
     }
 
     printf("WHO_AM_I = 0x%02X (expected 0x68)\n", (unsigned)identity);
     if (identity != 0x68) {
         printf("Unexpected identity; stopping IMU setup\n");
-        goto cleanup;
+        imu_result = ESP_ERR_INVALID_RESPONSE;
+        goto fail;
     }
 
     // Wake the sensor (PWR_MGMT_1 = 0x01).
-    if (write_and_verify(imu_device, "PWR_MGMT_1", 0x6B, 0x01) != ESP_OK) {
-        goto cleanup;
+    if (write_and_verify(*imu_device, "PWR_MGMT_1", 0x6B, 0x01) != ESP_OK) {
+        imu_result = ESP_ERR_INVALID_RESPONSE;
+        goto fail;
     }
 
     // Gyro range ±250 degrees/s; sensitivity: 131 counts per degree/s.
     // Zero also leaves this sensor's self-test bits disabled.
-    if (write_and_verify(imu_device, "GYRO_CONFIG", 0x1B, 0x00) != ESP_OK) {
-        goto cleanup;
+    if (write_and_verify(*imu_device, "GYRO_CONFIG", 0x1B, 0x00) != ESP_OK) {
+        imu_result = ESP_ERR_INVALID_RESPONSE;
+        goto fail;
     }
 
     // Accel range ±2 g; sensitivity: 16384 counts per g.
     // Zero also leaves this sensor's self-test bits disabled.
-    if (write_and_verify(imu_device, "ACCEL_CONFIG", 0x1C, 0x00) != ESP_OK) {
-        goto cleanup;
+    if (write_and_verify(*imu_device, "ACCEL_CONFIG", 0x1C, 0x00) != ESP_OK) {
+        imu_result = ESP_ERR_INVALID_RESPONSE;
+        goto fail;
     }
 
     // Low-pass filter (DLPF_CFG = 4): gyro ~20 Hz, accel ~21 Hz, about 8.5 ms delay.
     // We read at 100 Hz, so faster shaking must be removed first or it adds false gyro angle.
-    if (write_and_verify(imu_device, "CONFIG", 0x1A, 0x04) != ESP_OK) {
-        goto cleanup;
+    if (write_and_verify(*imu_device, "CONFIG", 0x1A, 0x04) != ESP_OK) {
+        imu_result = ESP_ERR_INVALID_RESPONSE;
+        goto fail;
     }
 
     // Measure gyro bias while still, then check that removing it gives near 0 dps.
-    gyro_bias_t gyro_bias = {0};
-    imu_result = imu_measure_gyro_bias(imu_device, &gyro_bias);
+    imu_result = imu_measure_gyro_bias(*imu_device, gyro_bias);
     if (imu_result != ESP_OK) {
         printf("Gyro bias measurement failed: %s\n", esp_err_to_name(imu_result));
-        goto cleanup;
+        goto fail;
     }
 
+    return ESP_OK;
+
+fail:
+    // The device was added but setup failed: remove it so the caller gets nothing half set up.
+    if (i2c_master_bus_rm_device(*imu_device) != ESP_OK) {
+        printf("Remove IMU failed\n");
+    }
+    *imu_device = NULL;
+    return imu_result;
+}
+
+void imu_run(i2c_master_bus_handle_t imu_bus)
+{
+    gyro_bias_t gyro_bias = {0};
+    i2c_master_dev_handle_t imu_device = NULL;
+    esp_err_t imu_result = imu_init(imu_bus, &imu_device, &gyro_bias);
+    if (imu_result != ESP_OK) {
+        printf("IMU init failed: %s\n", esp_err_to_name(imu_result));
+        return;     // imu_init already removed the device
+    }
     imu_result = imu_log_corrected_gyro(imu_device, &gyro_bias);
     if (imu_result != ESP_OK) {
         printf("Bias check read failed: %s\n", esp_err_to_name(imu_result));

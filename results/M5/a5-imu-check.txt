@@ -1,0 +1,31 @@
+I2C device responded at 0x68
+WHO_AM_I = 0x68 (expected 0x68)
+PWR_MGMT_1 = 0x01 (expected 0x01)
+GYRO_CONFIG = 0x00 (expected 0x00)
+ACCEL_CONFIG = 0x00 (expected 0x00)
+CONFIG = 0x04 (expected 0x04)
+Keep the breadboard still: 1000 samples, nominal 10 ms spacing
+Summary: 1000 samples over 9.99 s, mean dt 10.00 ms
+channel,unit,mean,std,min,max
+ax,g,-0.0764,0.0011,-0.0798,-0.0729
+ay,g,0.0407,0.0010,0.0369,0.0441
+az,g,1.8281,0.0018,1.8230,1.8335
+temp,C,24.3323,0.1236,23.9447,24.4947
+gx,dps,-2.0112,0.0317,-2.1069,-1.9160
+gy,dps,-0.1773,0.0382,-0.2901,-0.0382
+gz,dps,0.0978,0.0312,0.0076,0.2061
+Accel magnitude with Z offset 0.818 g and scale 1.036 corrected: 0.9788 g
+Gyro bias: gx=-2.0112 gy=-0.1773 gz=0.0978 dps
+Bias check: 10 gyro samples with bias removed
+sample,read_start_us,gx_dps,gy_dps,gz_dps
+1,10189290,-0.0117,0.0323,0.0625
+2,10292017,-0.0117,0.0018,0.0396
+3,10392019,-0.0117,0.0018,-0.0367
+4,10492017,0.0036,-0.0211,0.0015
+5,10592017,0.0341,0.0018,-0.0291
+6,10692017,-0.0804,-0.0517,-0.0138
+7,10792017,0.0188,-0.0898,0.0702
+8,10892017,-0.0422,-0.0211,0.0549
+9,10992017,-0.0575,0.0476,-0.0673
+10,11092017,-0.0499,-0.0440,0.0396
+Roll filter: tau 0.50 s, run 30 s, test bias error 0.00 dps

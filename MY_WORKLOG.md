@@ -720,9 +720,94 @@ Or in VS Code: Terminal › Run Task › M5: flash + monitor (activates ESP-IDF 
 - To check: board firm in the foam, pins 14 / 41 / 42 / 5V / 3V3 / GND above the foam, board over the shaft, camera forward at 1500 µs (powered).
 - M5-hardware.md rewritten for this mount.
 
+2026-10-23 — Restarted M5 with the rewritten guide (Part A, hardware checks). Folder cleanup committed first (f431684).
+
+- A1: only the servo wired (5V → + rail, GND → − rail, brown −, red +, orange → 14). Powered: holds 1500 µs. Camera points a little right of straight ahead. Pulling the horn and moving it one spline tooth left puts it too far left → kept the horn, drew the 0° arrow along the camera's real direction instead.
+- A2–A3: mount firm, GND / 5V / 14 / 41 / 42 / 3V3 reachable from the back. Wired servo (5V / GND / 14) and IMU (3V3 / GND / 41 / 42). IMU GND goes to the − rail too (shared ground). [Photo](figures/M5/m5-a3-wired.png)
+- A4: first run the servo did not move at all. Cause: a female-to-female jumper on the servo's orange signal wire (no pin to grip). Swapped for female-to-male → sweep 0 → ±30° → 0 works. Range columns all INVALID: expected, no range sensor in M5 (m3_run is reused only for the sweep). [Log, first run before the fix](results/M5/a4-loaded-sweep-no-signal.txt)
+- A5: IMU through m2_run. WHO_AM_I = 0x68 and all 4 config registers read back as written. 1000 still samples at 24.3 °C: gyro bias gx −2.01, gy −0.18, gz +0.10 °/s; corrected |a| = 0.979 g → IMU lies flat, so gz is probably the yaw axis (B4 confirms). gy bias was +1.14 in M2 at 35 °C → bias drifts with temperature, recalibrate at every boot. [Log](results/M5/a5-imu-check.txt)
+- A6: camera through m4_run, target ~30 cm in front on the 0° arrow. All 84 rows valid, 1 blob, confidence 1.00, ~48 ms per frame. Centre cx 74.6 (slightly left, fits the camera pointing a little right in A1). Camera's left → cx 23.7, camera's right → cx ~119. Matches M4. Frame dump at 3 s froze the frame counter for ~7 s (age_ms up to 7025): debugging only. [Log](results/M5/a6-camera-cx.txt)
+- A7: SIGN = −1 (target left → cx 23.7 → e = −0.70 < 0 → need + angle = L).
+
+Part A complete. Next: B1 (P-only tracking).
+
+2026-10-24 — Part B, software. All M5 code in firmware/main/exercises/m5/ (m5_main.c, control.c, base_yaw.c), reusing m3/servo.c, m4/vision.c and the m2 IMU files by path.
+
+- Setup: m5_run → servo_init → vision_init → run_control. Perception task (prio 4, xTaskDelayUntil 100 ms) → 1-slot xQueueOverwrite. Camera-limited to ~7 fps (~140 ms per frame), max age 180 ms vs the 200 ms stale limit. Control task (prio 6) woken by an esp_timer every 20 ms (xTaskNotifyGive / ulTaskNotifyTake), peeks the queue, never waits for a frame. dt = 20.00 ms.
+- B1 (P only, theta = SIGN·Kp·e, clamp ±30°, rate limit 1.2°/tick): direction right. Kp 5 maxed at ~5°; Kp 20 reached ~13° and stayed stable. P stops short: with Kp 20 and a target at 15° it settles at ~6.5°, because theta is an absolute position that needs a leftover error to exist. Kp 20 chosen. [Kp 5](results/M5/b1-p-only-kp5.txt) · [Kp 20](results/M5/b1-p-only-kp20.txt)
+- B2 (PI): I_try = I + e·dt; only keep it if |Kp·e + Ki·I_try| < 30° (anti-windup). Not fresh → I frozen; target lost > 2 s → I = 0, theta holds. Ki 10 settled in ~12 s, Ki 20 ~8 s, Ki 40 ~5 s with one swing < 1°, stable on a 20 s hold. Ki 40 chosen. Windup test: at the limit I froze at −0.726, recovered in ~3 s. Cover test: I reset after 2 s, no jump on uncover. Centred target sits at θ ≈ +4° (the A1 offset, held by I). [Ki 10](results/M5/b2-pi-ki10.txt) · [Ki 20](results/M5/b2-pi-ki20.txt) · [Ki 40](results/M5/b2-pi-ki40.txt) · [Ki 40 hold](results/M5/b2-pi-ki40-hold.txt) · [Windup + cover](results/M5/b2-windup-cover.txt)
+- B3 (logger + timing): logger task (prio 1) behind a 64-slot FIFO, xQueueSend timeout 0 + drop counter; control never prints. LOG row every tick, TIMING summary every 250 ticks. Bugs fixed on the way: summary sent every tick (ticks % 250 true at 0), first window max 220 ms (dt measured after the peek), kind overwritten by the compound literal. host/analyze_m5.py on 72 s: mean dt 20.001 ms, p95 |dt−20| 0.010 ms, max 20.39 ms, 0 late (> 25 ms), 0 drops, max age 184 ms. [Log](results/M5/b3-timing.txt)
+
+2026-10-24/25 — B4, base yaw from the IMU.
+
+- Refactor: split M2 imu_run → public imu_init(bus, &device, &bias) (probe, WHO_AM_I, 4 settings, gyro bias). It removes the device itself if a later step fails, so the caller gets all or nothing. M2 still uses it; M5 calls it before run_control (base must be still ~10 s). IMU on I2C port 0 (41/42), camera SCCB on port 1: no clash.
+- B4a: turned the whole base left → gz swings + (+2 to +10 °/s), gx/gy stay small. IMU lies flat (az ≈ 1 g). YAW_AXIS gz, YAW_SIGN +1. [Log](results/M5/b4a-axis.txt)
+- B4b: sensor task (prio 5, 10 ms) integrates yaw += rate·dt every sample, sends {yaw_deg, rate_dps, valid, time_us} through a 1-slot overwrite. time_us = when the sample was read (int64_t: a float can't hold µs uptime). Still 70 s: 0.17° → drift ~0.15 °/min. 30° left reads 30.6°, 90° (book corner) reads 90.5°. A first 30° try read 35.5°: the drawn line was off, not the code. [Log](results/M5/b4-yaw.txt)
+- Why gyro only: turning around the vertical axis doesn't change gravity's direction, so the accelerometer can't see yaw and the M2 filter has nothing to correct it with. Yaw drifts; the camera loop corrects what's left. Sliding the base is handled by the camera + PI, not the IMU.
+
+2026-10-25 — B5, stabilization.
+
+- Code: base_yaw.c keeps sensor_queue static and offers get_sensor_packet() (returns pdFALSE if the IMU never started, so control can't crash). sensor_packet_t moved to base_yaw.h. Control peeks it every tick: fresh = valid and age < 30 ms (IMU updates every 10 ms; 200 ms would let the base turn too far on stale data). yaw_ref = first fresh yaw. theta_stab = −(yaw − yaw_ref), then theta = theta_track + theta_stab → same clamp + 60 °/s rate limit. Servo and logger now run every tick even with no camera frame. Logger gets yaw, theta_stab and imu_valid = STABILIZE && yaw_fresh.
+- Bugs fixed on the way: getter compared with ESP_OK although xQueuePeek returns pdTRUE; theta_stab -= yaw ran away; float I = 0 inside the loop silently turned PI into P; a helper named log() clashed with math.h.
+- Step 1, stabilization only (Kp = Ki = 0): base 20.5° left → theta_stab −20.5°, equal and opposite, sign right. e held during the turn; drifted during the hold, probably the base sliding (the IMU can't see sideways motion). [Log](results/M5/b5-stab-only.txt)
+- Step 2, both on (Kp 20, Ki 40): twists +15° and −19.5°, theta_stab mirrors them. mean |e| 0.019, max |e| 0.146 (~4°), imu_valid 1 throughout, 0 late ticks. At −19.5° held: theta 26 = track 6.6 + stab 19.5, so the IMU does most of the work and PI only the leftover. [Log](results/M5/b5-both.txt)
+- IMU SDA unplugged (USB out first): imu_init fails, imu_valid 0 and theta_stab 0 on every row, tracking still follows the target (theta −6 → +22.5°). [Log](results/M5/b5-no-imu-check.txt)
+
+B5 complete. Next: B6 (paired trials, STABILIZE on vs off).
+
+2026-10-25 — B6, paired trials (the M5 evidence).
+
+- Setup: Kp 20, Ki 40 in every trial, only STABILIZE changes. Target ~30 cm on the 0° arrow. Each trial: centred 5 s → base 0° → 20° left, hold 5 s → back to 0°, hold 5 s. 3 trials on, 3 off, plus a 10 s static run (STABILIZE = true, nobody touches anything). My turns took ~3 s, slower than the guide's 1 s.
+- host/analyze_m5.py (rewritten with Claude): one analyze(path) function per log, main() loops over all files and prints a group table. Turn = yaw moves > 1.5° in 0.5 s (4 s gap so one slow turn isn't counted twice). Settling = scan backwards from the end of each turn window to the last |e| ≥ 0.2. e is NaN on non-fresh rows, so RMS/max only use real camera data. First 1 s skipped (servo slewing to the target at the 60 °/s limit). Run: `python3 host/analyze_m5.py results/M5/b6-*.txt` (needs matplotlib on the Mac). [Output](results/M5/b6-analysis.txt)
+
+| group | n | RMS e | max \|e\| | sat % | settling | dt max |
+|---|---|---|---|---|---|---|
+| STABILIZE off | 3 | 0.075 (2.0°) | 0.230 (6.0°) | 0.2 | 1.70 s | 20.46 ms |
+| STABILIZE on | 3 | 0.022 (0.6°) | 0.068 (1.8°) | 0.3 | 0.00 s (never left ±0.2) | 20.48 ms |
+| static | 1 | 0.022 (0.6°) | 0.042 (1.1°) | 0.2 | — | 20.48 ms |
+
+- Result: stabilization cut RMS e and max |e| by ~3.4×, and the target never left the ±0.2 band, so no settling needed. With it off, e reached ~6° during each turn and took ~1.7 s on average to settle as the slow camera loop (~7 fps) caught up. Timing 20 ms in every file, 0 late ticks, max age 184 ms.
+- Static check: |e| max 0.042, far under 0.2, but 1 saturated tick (rate limit catching a camera jump) → FAIL as the guide defines it ("no saturation"). Reported as is.
+- Plots (e in °, theta, yaw; red = turn start, dotted = ±0.2): [off 1](figures/M5/b6-stab-off-1.png) · [off 2](figures/M5/b6-stab-off-2.png) · [off 3](figures/M5/b6-stab-off-3.png) · [on 1](figures/M5/b6-stab-on-1.png) · [on 2](figures/M5/b6-stab-on-2.png) · [on 3](figures/M5/b6-stab-on-3.png) · [static](figures/M5/b6-static.png)
+- Gain table (from B1–B2): Kp 5 → max ~5°, Kp 20 → ~13° stable (chosen). Ki 10 → ~12 s settle, Ki 20 → ~8 s, Ki 40 → ~5 s, one swing < 1° (chosen).
+
+B6 complete. Next: Finish M5.
+
+B2: 
+This is my thinking:
+
+Starts at 0, target at 15deg - big error - larger offset - offset1 add to current position (which is 0)
+Moves to the new position (offset1 + 0) - smaller error - smaller offset - offset2 add to current position (which is offset1 + 0)
+Reached target - no error - no offset - offset3 add to current position but offset3 is zero so just current position (which is offset1 + offset2 + 0)
+repeat loop
+
+
 Questions:
 
+1. How is this feedback controller different from Adam training a neural policy in your pendulum project?
+-> The controller doesn't get better between runs, it is calibrated at the start. It reacts to the error with fixed rules like KP 20, KI 40. Those numbers came form data, and those data came from multiple tests.
+
+2. Why can the integral wind up at a limit, and what exactly does your anti-windup do?
+-> integral wind up does not have a limit, the error can keep adding u and forces the servo to turn as much but because we set a limit of largest turn degree, we need anti-windup to make sure the integral stays the same when reaches the limit
+
+3. Why can one servo not cancel three independent rotations? What happens to the camera if the base *tilts* instead of turning?
+-> Because servo only moves in one plane.
+
+4. Why does the yaw estimate drift when your M2 roll estimate didn't?
+-> Because the base is kept flat
+
+5. The servo angle in your logs is a command, not a measurement. What could make the real camera angle differ?
+-> Using A1's log, when theta commands servo to 0 deg (or neutral), the camera actually points roughly a little bit right off the neutral line.
+
 Assistant comments (corrections):
+
+Overall: Q1, Q2 and Q5 have the right idea but are incomplete. Q3 and Q4 miss the key reason.
+
+- **Q1:** Mostly right, but "calibrated at the start" mixes two things. The gyro *bias* is calibrated at start-up. The *gains* (KP 20, KI 40) were picked by hand from B1/B2 trials, not learned. The real difference: Adam changed thousands of network weights by gradient descent on a loss over many simulated episodes, offline. This PI law has a fixed shape chosen by you, two numbers, and no training. It works live from the measured error alone and needs no model of the plant. (The I term does "adapt" a little within one run, but it forgets on reset.)
+- **Q2:** The idea "keep I the same at the limit" is right; the reason needs fixing. Windup happens *because* the output is clamped (±30°): the servo can't go further, so e stays non-zero and I keeps growing even though the extra I does nothing. When e finally flips sign, that big stored I must unwind first, which causes overshoot. Your anti-windup computes `I_try = I + e*dt` and keeps it only if `|KP*e + KI*I_try| < 30`; otherwise I stays at its old value. In B2, I froze at −0.726 while at the 30° limit.
+- **Q3:** True but too short. The base can rotate about three independent axes (yaw, pitch, roll). One servo is one degree of freedom, so it can only cancel rotation about its own axis (yaw). If the base *tilts* (pitch), the camera view moves up or down and the target can leave the frame vertically; roll spins the image. The servo can't fix either. Also, gz only equals yaw while the base is flat, so a tilt makes the yaw estimate itself wrong.
+- **Q4:** Not the reason. "Base kept flat" is why gz equals yaw, not why it drifts. Roll didn't drift because the accelerometer sees gravity, an absolute reference the complementary filter keeps pulling toward. Turning about the vertical axis doesn't change the gravity reading at all, so yaw has no reference: the leftover gyro bias just integrates (0.15°/min in B4). A fix needs another reference, such as a magnetometer (the MPU6050 has none) or camera landmarks.
+- **Q5:** One good example (the ~4° A1 offset at neutral). Others: the servo's own speed and lag behind the command, gear backlash and deadband (small commands do nothing), the mount and foam flexing, load torque on the horn, the pulse-to-angle mapping not being perfectly linear, and supply voltage sag. Only a measurement (camera or encoder) would show the real angle.
 
 ---------------------------------------------------------------------------------
 

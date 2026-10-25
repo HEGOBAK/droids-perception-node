@@ -1,15 +1,6 @@
 // Saved M4 exercise (step 6: perception task + 1-slot queue); not built. See firmware/main/README.md to run it again.
 #include "m4_main.h"
 
-#include <stdio.h>
-#include "esp_err.h"
-#include "esp_system.h"
-#include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
-#include "vision.h"
-
 // M4 step 6: a perception task finds the target and sends a small result through a 1-slot queue
 // (M1 pattern: latest value only, a copy, never the frame pointer). The main task reads and prints it.
 
